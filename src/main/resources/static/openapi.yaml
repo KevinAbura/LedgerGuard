@@ -1,0 +1,377 @@
+openapi: 3.1.0
+info:
+  title: LedgerGuard API
+  version: 0.1.0
+  description: Multi-tenant, double-entry wallet ledger with immutable reversals and idempotent posting.
+servers:
+  - url: http://localhost:8080
+security:
+  - ApiKey: []
+tags:
+  - name: Accounts
+  - name: Transactions
+paths:
+  /v1/accounts:
+    post:
+      tags: [Accounts]
+      summary: Create a ledger account
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Accounts]
+      summary: Get an account and its projected balance
+      operationId: getAccount
+      responses:
+        '200':
+          description: Account found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/transactions:
+    post:
+      tags: [Transactions]
+      summary: Atomically post a balanced journal transaction
+      operationId: postTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostTransactionRequest'
+      responses:
+        '201':
+          description: Posted, or replayed from the idempotency record
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+              description: True when the stored response was returned without posting again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/transactions/{transactionId}:
+    parameters:
+      - $ref: '#/components/parameters/TransactionId'
+    get:
+      tags: [Transactions]
+      summary: Get a posted transaction and immutable entries
+      operationId: getTransaction
+      responses:
+        '200':
+          description: Transaction found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/transactions/{transactionId}/reverse:
+    parameters:
+      - $ref: '#/components/parameters/TransactionId'
+    post:
+      tags: [Transactions]
+      summary: Reverse a transaction with an equal and opposite journal
+      operationId: reverseTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReverseRequest'
+      responses:
+        '201':
+          description: Reversal posted
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  schemas:
+    CreateAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [externalId, currency, accountType]
+      properties:
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        currency:
+          type: string
+          pattern: '^[A-Z]{3,12}$'
+          examples: [USD]
+        accountType:
+          type: string
+          enum: [ASSET, LIABILITY]
+        allowNegative:
+          type: boolean
+          default: false
+    Account:
+      type: object
+      required: [id, externalId, currency, accountType, allowNegative, balance, version, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+        currency:
+          type: string
+        accountType:
+          type: string
+          enum: [ASSET, LIABILITY]
+        allowNegative:
+          type: boolean
+        balance:
+          type: number
+          multipleOf: 0.00000001
+        version:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED]
+    PostTransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [externalReference, transactionType, entries]
+      properties:
+        externalReference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        transactionType:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 500
+        effectiveAt:
+          type: string
+          format: date-time
+        entries:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/EntryRequest'
+    EntryRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, side, amount]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        side:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          multipleOf: 0.00000001
+    ReverseRequest:
+      type: object
+      additionalProperties: false
+      required: [externalReference]
+      properties:
+        externalReference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        reason:
+          type: string
+          maxLength: 500
+    Transaction:
+      type: object
+      required: [id, externalReference, transactionType, effectiveAt, createdAt, entries]
+      properties:
+        id:
+          type: string
+          format: uuid
+        externalReference:
+          type: string
+        transactionType:
+          type: string
+        description:
+          type: string
+        effectiveAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        reversalOf:
+          type: string
+          format: uuid
+        reversedBy:
+          type: string
+          format: uuid
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entry'
+    Entry:
+      type: object
+      required: [id, accountId, side, amount, currency]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        side:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: number
+        currency:
+          type: string
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+  responses:
+    BadRequest:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: API key is missing, invalid, or inactive
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found in the authenticated tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Ledger invariant or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Token bucket has no capacity
+      headers:
+        Retry-After:
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Policy:
+          schema:
+            type: string
+            enum: [redis-token-bucket, local-fallback]
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
