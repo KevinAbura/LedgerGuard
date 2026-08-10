@@ -27,8 +27,10 @@ CREATE TABLE ledger_accounts (
     status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'FROZEN', 'CLOSED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (allow_negative OR balance >= 0),
     UNIQUE (tenant_id, external_id),
-    UNIQUE (id, tenant_id)
+    UNIQUE (id, tenant_id),
+    UNIQUE (id, tenant_id, currency)
 );
 
 CREATE TABLE journal_transactions (
@@ -39,11 +41,13 @@ CREATE TABLE journal_transactions (
     description VARCHAR(500),
     effective_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    reversal_of UUID REFERENCES journal_transactions(id),
-    reversed_by UUID REFERENCES journal_transactions(id),
+    reversal_of UUID,
+    reversed_by UUID,
     UNIQUE (tenant_id, external_reference),
     UNIQUE (id, tenant_id),
-    UNIQUE (reversal_of)
+    UNIQUE (reversal_of),
+    FOREIGN KEY (reversal_of, tenant_id) REFERENCES journal_transactions(id, tenant_id),
+    FOREIGN KEY (reversed_by, tenant_id) REFERENCES journal_transactions(id, tenant_id)
 );
 
 CREATE TABLE journal_entries (
@@ -53,10 +57,10 @@ CREATE TABLE journal_entries (
     account_id UUID NOT NULL,
     side VARCHAR(8) NOT NULL CHECK (side IN ('DEBIT', 'CREDIT')),
     amount NUMERIC(30, 8) NOT NULL CHECK (amount > 0),
-    currency VARCHAR(12) NOT NULL,
+    currency VARCHAR(12) NOT NULL CHECK (currency ~ '^[A-Z]{3,12}$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (transaction_id, tenant_id) REFERENCES journal_transactions(id, tenant_id),
-    FOREIGN KEY (account_id, tenant_id) REFERENCES ledger_accounts(id, tenant_id)
+    FOREIGN KEY (account_id, tenant_id, currency) REFERENCES ledger_accounts(id, tenant_id, currency)
 );
 
 CREATE INDEX journal_entries_transaction_idx ON journal_entries(transaction_id);
@@ -112,18 +116,20 @@ DECLARE
     entry_count BIGINT;
     debit_total NUMERIC(30, 8);
     credit_total NUMERIC(30, 8);
+    currency_count BIGINT;
 BEGIN
     target_transaction := COALESCE(NEW.transaction_id, OLD.transaction_id);
     SELECT count(*),
            COALESCE(sum(amount) FILTER (WHERE side = 'DEBIT'), 0),
-           COALESCE(sum(amount) FILTER (WHERE side = 'CREDIT'), 0)
-      INTO entry_count, debit_total, credit_total
+           COALESCE(sum(amount) FILTER (WHERE side = 'CREDIT'), 0),
+           count(DISTINCT currency)
+      INTO entry_count, debit_total, credit_total, currency_count
       FROM journal_entries
      WHERE transaction_id = target_transaction;
 
-    IF entry_count < 2 OR debit_total <> credit_total THEN
-        RAISE EXCEPTION 'transaction % is not balanced (debit %, credit %, entries %)',
-            target_transaction, debit_total, credit_total, entry_count;
+    IF entry_count < 2 OR debit_total <> credit_total OR currency_count <> 1 THEN
+        RAISE EXCEPTION 'transaction % is invalid (debit %, credit %, entries %, currencies %)',
+            target_transaction, debit_total, credit_total, entry_count, currency_count;
     END IF;
     RETURN NULL;
 END;

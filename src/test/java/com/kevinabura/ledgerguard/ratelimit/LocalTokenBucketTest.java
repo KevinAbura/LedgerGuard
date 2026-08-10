@@ -1,6 +1,7 @@
 package com.kevinabura.ledgerguard.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -11,6 +12,14 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class LocalTokenBucketTest {
+
+    @Test
+    void rejectsNonPositiveFallbackConfiguration() {
+        assertThatThrownBy(() -> new LocalTokenBucket(Clock.systemUTC(), 0, 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LocalTokenBucket(Clock.systemUTC(), 1, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 
     @Test
     void admitsOnlyCapacityUnderConcurrentLoad() throws Exception {

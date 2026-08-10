@@ -44,6 +44,7 @@ ledgerguard:
     enabled: ${OUTBOX_ENABLED:true}
     topic: ${LEDGER_EVENTS_TOPIC:ledger.events.v1}
     batch-size: ${OUTBOX_BATCH_SIZE:50}
+    publish-timeout-ms: ${OUTBOX_PUBLISH_TIMEOUT_MS:10000}
   rate-limit:
     fallback-capacity: ${RATE_LIMIT_FALLBACK_CAPACITY:20}
     fallback-refill-per-second: ${RATE_LIMIT_FALLBACK_REFILL:10}

@@ -7,6 +7,7 @@ It uses Java 25, Spring Boot 4, PostgreSQL, Redis, and Kafka. The core journal i
 ## What this project demonstrates
 
 - Double-entry validation in both Java and PostgreSQL
+- Database-enforced tenant, currency, numeric-range, and negative-balance boundaries
 - Immutable journal entries and auditable reversals
 - Transactional idempotency with request-hash conflict detection
 - Deterministic `SELECT ... FOR UPDATE` locking and optimistic version checks
@@ -86,7 +87,7 @@ flowchart LR
     API --> Metrics["Actuator / Prometheus"]
 ```
 
-The posting transaction atomically claims the idempotency key, locks all accounts in UUID order, inserts the journal and entries, updates balance projections, inserts an outbox event, and stores the replay response. Any failure rolls all of it back.
+The posting transaction atomically claims the idempotency key, locks all accounts in UUID order, inserts the journal and entries, updates balance projections, inserts an outbox event, and stores the replay response. Any failure rolls all of it back. A transaction accepts 2–100 entries, and monetary values must fit PostgreSQL `NUMERIC(30, 8)` without rounding.
 
 See [architecture.md](docs/architecture.md) for the posting sequence and [design-decisions.md](docs/design-decisions.md) for explicit trade-offs.
 

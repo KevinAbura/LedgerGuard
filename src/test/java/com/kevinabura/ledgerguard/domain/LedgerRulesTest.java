@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.kevinabura.ledgerguard.error.UnbalancedTransactionException;
 import com.kevinabura.ledgerguard.error.ValidationException;
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,32 @@ class LedgerRulesTest {
                 new EntryDraft(UUID.randomUUID(), JournalSide.CREDIT, new BigDecimal("1.000000001")))))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("at most 8");
+    }
+
+    @Test
+    void rejectsAmountsThatDoNotFitTheDatabaseMoneyType() {
+        assertThatThrownBy(() -> LedgerRules.validateAndNormalize(List.of(
+                new EntryDraft(
+                        UUID.randomUUID(), JournalSide.DEBIT, new BigDecimal("10000000000000000000000")),
+                new EntryDraft(
+                        UUID.randomUUID(), JournalSide.CREDIT, new BigDecimal("10000000000000000000000")))))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("22 integer");
+    }
+
+    @Test
+    void rejectsNullAndOversizedEntryCollections() {
+        assertThatThrownBy(() -> LedgerRules.validateAndNormalize(Arrays.asList(
+                null,
+                new EntryDraft(UUID.randomUUID(), JournalSide.CREDIT, BigDecimal.ONE))))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Each entry");
+
+        var entry = new EntryDraft(UUID.randomUUID(), JournalSide.DEBIT, BigDecimal.ONE);
+        assertThatThrownBy(() -> LedgerRules.validateAndNormalize(
+                Collections.nCopies(LedgerRules.MAX_ENTRIES + 1, entry)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("at most " + LedgerRules.MAX_ENTRIES);
     }
 
     @Test

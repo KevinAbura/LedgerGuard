@@ -48,6 +48,9 @@ public class LedgerRepository {
                     """, id, tenantId, externalId, currency, type.name(), allowNegative,
                     Timestamp.from(now), Timestamp.from(now));
         } catch (DataIntegrityViolationException exception) {
+            if (!isUniqueViolation(exception)) {
+                throw exception;
+            }
             throw new ConflictException("account_exists", "An account with this externalId already exists");
         }
         return getAccount(tenantId, id);
@@ -98,11 +101,12 @@ public class LedgerRepository {
         }
 
         return jdbc.queryForObject("""
-                SELECT request_hash, response_body::text
+                SELECT request_hash, resource_type, response_body::text
                   FROM idempotency_records
                  WHERE tenant_id = ? AND idempotency_key = ?
                 """, (rs, rowNum) -> {
-                    if (!requestHash.equals(rs.getString("request_hash"))) {
+                    if (!resourceType.equals(rs.getString("resource_type"))
+                            || !requestHash.equals(rs.getString("request_hash"))) {
                         return new IdempotencyClaim.Conflict();
                     }
                     var body = rs.getString("response_body");
@@ -153,6 +157,9 @@ public class LedgerRepository {
                         entry.amount(), accounts.get(entry.accountId()).currency(), Timestamp.from(now));
             }
         } catch (DataIntegrityViolationException exception) {
+            if (!isUniqueViolation(exception)) {
+                throw exception;
+            }
             throw new ConflictException(
                     "external_reference_exists",
                     "A transaction with this externalReference already exists or was already reversed");
@@ -266,6 +273,15 @@ public class LedgerRepository {
                 JournalSide.valueOf(rs.getString("side")),
                 rs.getBigDecimal("amount"),
                 rs.getString("currency")), transactionId);
+    }
+
+    private static boolean isUniqueViolation(Throwable error) {
+        for (var cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException && "23505".equals(sqlException.getSQLState())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static AccountView mapAccountView(ResultSet rs, int rowNum) throws SQLException {

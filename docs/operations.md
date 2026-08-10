@@ -24,7 +24,7 @@ Recommended starting signals:
 - readiness failures for more than two probe intervals
 - any sustained `ledgerguard_rate_limit_redis_errors_total` increase
 - local fallback lasting more than one minute
-- outbox failed-event rate above zero for five minutes
+- outbox failed-event or lost-lease rate above zero for five minutes
 - oldest unpublished outbox event older than the delivery SLO
 - PostgreSQL lock wait or connection-pool saturation
 - HTTP 5xx rate, idempotency conflicts, and insufficient-funds conflicts separated by code
@@ -41,4 +41,4 @@ The demo migration contains one known development secret. A deployment process s
 
 ## Shutdown and deployment
 
-Spring graceful shutdown is enabled. Stop routing new requests before terminating an instance so active database transactions can finish. Outbox leases expire after 30 seconds; another relay can safely reclaim work after an ungraceful stop.
+Spring graceful shutdown is enabled. Stop routing new requests before terminating an instance so active database transactions can finish. Outbox sends default to a 10-second timeout and leases expire after 30 seconds; another relay can safely reclaim work after an ungraceful stop.

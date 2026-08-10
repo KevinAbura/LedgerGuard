@@ -57,21 +57,21 @@ public class OutboxRepository {
                 rs.getObject("lock_token", UUID.class)), lockToken);
     }
 
-    public void markPublished(OutboxEvent event) {
-        jdbc.update("""
+    public boolean markPublished(OutboxEvent event) {
+        return jdbc.update("""
                 UPDATE outbox_events
                    SET published_at = ?, lock_token = NULL, locked_until = NULL, last_error = NULL
                  WHERE id = ? AND lock_token = ? AND published_at IS NULL
-                """, Timestamp.from(clock.instant()), event.id(), event.lockToken());
+                """, Timestamp.from(clock.instant()), event.id(), event.lockToken()) == 1;
     }
 
-    public void markFailed(OutboxEvent event, Throwable error) {
+    public boolean markFailed(OutboxEvent event, Throwable error) {
         var delay = Duration.ofSeconds(Math.min(300, 1L << Math.min(event.attempts(), 8)));
         var message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 1000) {
             message = message.substring(0, 1000);
         }
-        jdbc.update("""
+        return jdbc.update("""
                 UPDATE outbox_events
                    SET attempts = attempts + 1,
                        next_attempt_at = ?,
@@ -79,6 +79,6 @@ public class OutboxRepository {
                        locked_until = NULL,
                        last_error = ?
                  WHERE id = ? AND lock_token = ? AND published_at IS NULL
-                """, Timestamp.from(clock.instant().plus(delay)), message, event.id(), event.lockToken());
+                """, Timestamp.from(clock.instant().plus(delay)), message, event.id(), event.lockToken()) == 1;
     }
 }

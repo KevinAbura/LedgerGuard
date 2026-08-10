@@ -10,7 +10,6 @@ import com.kevinabura.ledgerguard.persistence.IdempotencyClaim;
 import com.kevinabura.ledgerguard.persistence.LedgerRepository;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Locale;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -193,7 +192,7 @@ public class LedgerService {
                     .filter(entry -> entry.accountId().equals(account.id()))
                     .map(entry -> LedgerRules.balanceDelta(account.type(), entry.side(), entry.amount()))
                     .reduce(java.math.BigDecimal.ZERO.setScale(LedgerRules.MONEY_SCALE), java.math.BigDecimal::add);
-            var newBalance = account.balance().add(delta);
+            var newBalance = LedgerRules.normalize(account.balance().add(delta));
             if (!account.allowNegative() && newBalance.signum() < 0) {
                 throw new InsufficientFundsException(account.id());
             }

@@ -242,6 +242,7 @@ components:
         entries:
           type: array
           minItems: 2
+          maxItems: 100
           items:
             $ref: '#/components/schemas/EntryRequest'
     EntryRequest:
@@ -259,6 +260,7 @@ components:
           type: number
           exclusiveMinimum: 0
           multipleOf: 0.00000001
+          description: Supports at most 22 integer digits and 8 decimal digits.
     ReverseRequest:
       type: object
       additionalProperties: false

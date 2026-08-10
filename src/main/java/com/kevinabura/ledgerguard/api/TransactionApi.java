@@ -48,7 +48,9 @@ public class TransactionApi {
                         body.description(),
                         body.effectiveAt(),
                         body.entries() == null ? null : body.entries().stream()
-                                .map(entry -> new EntryDraft(entry.accountId(), entry.side(), entry.amount()))
+                                .map(entry -> entry == null
+                                        ? null
+                                        : new EntryDraft(entry.accountId(), entry.side(), entry.amount()))
                                 .toList()));
         response.setHeader("Idempotent-Replayed", Boolean.toString(result.replayed()));
         return result.value();

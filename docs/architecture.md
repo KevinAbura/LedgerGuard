@@ -47,7 +47,7 @@ An account stores a balance in its normal-side convention:
 | Asset | Debit | increases | decreases |
 | Liability | Credit | decreases | increases |
 
-Each transaction has at least two strictly positive entries in one currency. Total debits must equal total credits at scale 8. Java rejects invalid commands before I/O, and a deferred PostgreSQL constraint trigger independently checks the committed journal.
+Each transaction has 2–100 strictly positive entries in one currency. Amounts are accepted only when they fit `NUMERIC(30, 8)` exactly. Total debits must equal total credits at scale 8. Java rejects invalid commands before I/O, and PostgreSQL independently enforces balanced single-currency entries, tenant-safe account and reversal links, and non-negative protected balances.
 
 `ledger_accounts.balance` is a transactionally maintained projection. `journal_entries` remains the source of truth and is protected by a database trigger that rejects updates and deletes. A production reconciliation job can rebuild the projection from the journal and compare the two.
 
@@ -59,7 +59,7 @@ After locks are held, the service computes every account delta, checks account s
 
 ## Idempotency model
 
-The primary key is `(tenant_id, idempotency_key)`. The stored SHA-256 request hash includes the normalized monetary values but not a server-generated effective time. Therefore a retry of a request that omitted `effectiveAt` still matches.
+The primary key is `(tenant_id, idempotency_key)`. A replay must match both the resource type and stored SHA-256 request hash. The hash includes normalized monetary values but not a server-generated effective time. Therefore a retry of a request that omitted `effectiveAt` still matches.
 
 `INSERT ... ON CONFLICT DO NOTHING` is executed inside the same database transaction as the journal. PostgreSQL makes a concurrent duplicate wait for the first transaction. It then observes either the completed replay body or no row if the original rolled back. Reusing a key for different request content is a conflict, not a replay.
 
@@ -69,6 +69,6 @@ A reversal is a new transaction whose sides are the exact opposite of the origin
 
 ## Event delivery model
 
-The ledger transaction and outbox event commit together, removing the database/Kafka dual-write gap. Relay workers claim independent batches using `FOR UPDATE SKIP LOCKED` and a time-bounded lease. Kafka acknowledgement is required before `published_at` is set.
+The ledger transaction and outbox event commit together, removing the database/Kafka dual-write gap. Relay workers claim independent batches using `FOR UPDATE SKIP LOCKED` and a time-bounded lease. Every Kafka send in a claimed batch is dispatched concurrently on virtual threads before the relay waits for acknowledgements, so one timeout window covers the batch even if metadata lookup blocks. Kafka acknowledgement is required before `published_at` is set, and a stale lock token is reported as a lost lease rather than a successful publication.
 
 Delivery is at least once: a relay crash after Kafka acknowledgement but before the database update can republish an event. Consumers must deduplicate on the stable `eventId` in the JSON payload.

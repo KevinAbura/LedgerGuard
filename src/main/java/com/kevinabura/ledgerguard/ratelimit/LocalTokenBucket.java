@@ -18,6 +18,9 @@ public class LocalTokenBucket {
             Clock clock,
             @Value("${ledgerguard.rate-limit.fallback-capacity:20}") int fallbackCapacity,
             @Value("${ledgerguard.rate-limit.fallback-refill-per-second:10}") int fallbackRefill) {
+        if (fallbackCapacity <= 0 || fallbackRefill <= 0) {
+            throw new IllegalArgumentException("Fallback rate-limit capacity and refill must be positive");
+        }
         this.clock = clock;
         this.fallbackCapacity = fallbackCapacity;
         this.fallbackRefill = fallbackRefill;

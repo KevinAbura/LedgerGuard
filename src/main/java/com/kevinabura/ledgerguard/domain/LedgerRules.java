@@ -7,7 +7,9 @@ import java.math.RoundingMode;
 import java.util.List;
 
 public final class LedgerRules {
+    public static final int MONEY_PRECISION = 30;
     public static final int MONEY_SCALE = 8;
+    public static final int MAX_ENTRIES = 100;
 
     private LedgerRules() {}
 
@@ -15,9 +17,12 @@ public final class LedgerRules {
         if (entries == null || entries.size() < 2) {
             throw new ValidationException("A journal transaction requires at least two entries");
         }
+        if (entries.size() > MAX_ENTRIES) {
+            throw new ValidationException("A journal transaction supports at most " + MAX_ENTRIES + " entries");
+        }
 
         var normalized = entries.stream().map(entry -> {
-            if (entry.accountId() == null || entry.side() == null || entry.amount() == null) {
+            if (entry == null || entry.accountId() == null || entry.side() == null || entry.amount() == null) {
                 throw new ValidationException("Each entry requires accountId, side, and amount");
             }
             var amount = normalize(entry.amount());
@@ -48,7 +53,11 @@ public final class LedgerRules {
 
     public static BigDecimal normalize(BigDecimal amount) {
         try {
-            return amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY);
+            var normalized = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY);
+            if (normalized.precision() > MONEY_PRECISION) {
+                throw new ValidationException("Amounts support at most 22 integer and 8 decimal digits");
+            }
+            return normalized;
         } catch (ArithmeticException exception) {
             throw new ValidationException("Amounts support at most " + MONEY_SCALE + " decimal places");
         }
