@@ -1,6 +1,7 @@
 package com.kevinabura.ledgerguard.outbox;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -21,9 +22,11 @@ public class OutboxRelay {
     private final String topic;
     private final int batchSize;
     private final long publishTimeoutMillis;
+    private final int maxAttempts;
     private final Counter published;
     private final Counter failed;
     private final Counter leaseLost;
+    private final Counter deadLettered;
 
     public OutboxRelay(
             OutboxRepository repository,
@@ -31,6 +34,7 @@ public class OutboxRelay {
             @Value("${ledgerguard.outbox.topic:ledger.events.v1}") String topic,
             @Value("${ledgerguard.outbox.batch-size:50}") int batchSize,
             @Value("${ledgerguard.outbox.publish-timeout-ms:10000}") long publishTimeoutMillis,
+            @Value("${ledgerguard.outbox.max-attempts:10}") int maxAttempts,
             MeterRegistry meterRegistry) {
         if (topic == null || topic.isBlank()) {
             throw new IllegalArgumentException("Outbox topic must not be blank");
@@ -41,14 +45,26 @@ public class OutboxRelay {
         if (publishTimeoutMillis <= 0) {
             throw new IllegalArgumentException("Outbox publish timeout must be positive");
         }
+        if (maxAttempts <= 0) {
+            throw new IllegalArgumentException("Outbox max attempts must be positive");
+        }
         this.repository = repository;
         this.kafka = kafka;
         this.topic = topic;
         this.batchSize = batchSize;
         this.publishTimeoutMillis = publishTimeoutMillis;
+        this.maxAttempts = maxAttempts;
         this.published = meterRegistry.counter("ledgerguard.outbox.events", "result", "published");
         this.failed = meterRegistry.counter("ledgerguard.outbox.events", "result", "failed");
         this.leaseLost = meterRegistry.counter("ledgerguard.outbox.events", "result", "lease_lost");
+        this.deadLettered = meterRegistry.counter("ledgerguard.outbox.events", "result", "dead_lettered");
+        Gauge.builder(
+                        "ledgerguard.outbox.oldest.unpublished.age",
+                        repository,
+                        OutboxRepository::oldestUnpublishedAgeSeconds)
+                .description("Age of the oldest pending outbox event")
+                .baseUnit("seconds")
+                .register(meterRegistry);
     }
 
     @Scheduled(fixedDelayString = "${ledgerguard.outbox.poll-delay-ms:500}")
@@ -92,10 +108,10 @@ public class OutboxRelay {
     }
 
     private void recordFailure(OutboxEvent event, Throwable error) {
-        if (repository.markFailed(event, error)) {
-            failed.increment();
-        } else {
-            leaseLost.increment();
+        switch (repository.markFailed(event, error, maxAttempts)) {
+            case RETRY_SCHEDULED -> failed.increment();
+            case DEAD_LETTERED -> deadLettered.increment();
+            case LEASE_LOST -> leaseLost.increment();
         }
     }
 

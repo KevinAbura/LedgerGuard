@@ -12,7 +12,7 @@ Prometheus metrics are exposed at `/actuator/prometheus`. In an internet-facing 
 |---|---|---|
 | PostgreSQL unavailable | Authentication/posting fails; no financial write is acknowledged | Remove instance from traffic, restore database connectivity |
 | Redis unavailable | Requests use a smaller per-instance local bucket and return `X-RateLimit-Policy: local-fallback` | Alert on fallback metric; restore Redis; watch aggregate load |
-| Kafka unavailable | Posting continues; outbox rows retry with exponential backoff | Alert on backlog age/count; restore broker; do not delete rows |
+| Kafka unavailable | Posting continues; outbox rows retry with exponential backoff, then dead-letter after `OUTBOX_MAX_ATTEMPTS` | Alert on backlog age/count; restore broker; inspect dead letters before requeueing |
 | Relay crashes after publish | Event may be published twice | Consumers deduplicate by payload `eventId` |
 | Concurrent overspend | One transaction obtains the account lock first; later invalid transaction rolls back | Expected business conflict, not an incident |
 | Duplicate request | Same hash replays stored result; changed hash returns 409 | Client must preserve one key per logical operation |
@@ -24,12 +24,31 @@ Recommended starting signals:
 - readiness failures for more than two probe intervals
 - any sustained `ledgerguard_rate_limit_redis_errors_total` increase
 - local fallback lasting more than one minute
-- outbox failed-event or lost-lease rate above zero for five minutes
+- outbox failed-event, dead-letter, or lost-lease rate above zero for five minutes
 - oldest unpublished outbox event older than the delivery SLO
 - PostgreSQL lock wait or connection-pool saturation
 - HTTP 5xx rate, idempotency conflicts, and insufficient-funds conflicts separated by code
 
-The current metrics expose relay outcomes but not oldest-event age. Add that gauge before production use.
+`ledgerguard_outbox_oldest_unpublished_age_seconds` exposes the pending backlog age. Dead-lettered rows are intentionally excluded because they require operator action.
+
+## Dead-letter inspection and requeue
+
+Inspect dead letters before replaying them; repeated poison payloads should remain quarantined until their cause is fixed:
+
+```sql
+SELECT id, aggregate_id, event_type, attempts, dead_lettered_at, last_error
+  FROM outbox_events
+ WHERE dead_lettered_at IS NOT NULL
+ ORDER BY dead_lettered_at;
+```
+
+After remediation, requeue one event explicitly. The function returns `true` only when a currently dead-lettered event was reset:
+
+```sql
+SELECT ledgerguard_requeue_outbox_event('EVENT_UUID');
+```
+
+Requeueing resets attempts and error state but never modifies the immutable ledger transaction that created the event.
 
 ## Backup and recovery
 

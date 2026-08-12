@@ -27,7 +27,7 @@ sequenceDiagram
         S-->>C: 409 idempotency_key_reused
     else new request
         S->>P: Lock accounts in sorted UUID order
-        S->>P: Insert transaction and immutable entries
+        S->>P: Insert draft transaction and entries; seal journal
         S->>P: Update balance projections with version checks
         S->>P: Insert outbox event and replay response
         S->>P: COMMIT; deferred balance trigger runs
@@ -49,7 +49,7 @@ An account stores a balance in its normal-side convention:
 
 Each transaction has 2–100 strictly positive entries in one currency. Amounts are accepted only when they fit `NUMERIC(30, 8)` exactly. Total debits must equal total credits at scale 8. Java rejects invalid commands before I/O, and PostgreSQL independently enforces balanced single-currency entries, tenant-safe account and reversal links, and non-negative protected balances.
 
-`ledger_accounts.balance` is a transactionally maintained projection. `journal_entries` remains the source of truth and is protected by a database trigger that rejects updates and deletes. A production reconciliation job can rebuild the projection from the journal and compare the two.
+`ledger_accounts.balance` is a transactionally maintained projection. A journal starts as `DRAFT`, accepts entries, and must become `POSTED` before the database transaction commits. Sealing independently verifies the entry count, currency, and debit/credit totals. Database triggers then reject new entries, header changes, updates, and deletes. A production reconciliation job can rebuild the projection from the sealed journal and compare the two.
 
 ## Concurrency model
 

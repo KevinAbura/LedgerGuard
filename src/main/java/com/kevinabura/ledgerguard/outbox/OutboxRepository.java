@@ -27,6 +27,7 @@ public class OutboxRepository {
                 SELECT id
                   FROM outbox_events
                  WHERE published_at IS NULL
+                   AND dead_lettered_at IS NULL
                    AND next_attempt_at <= ?
                    AND (locked_until IS NULL OR locked_until < ?)
                  ORDER BY created_at
@@ -65,20 +66,48 @@ public class OutboxRepository {
                 """, Timestamp.from(clock.instant()), event.id(), event.lockToken()) == 1;
     }
 
-    public boolean markFailed(OutboxEvent event, Throwable error) {
+    public OutboxFailureResult markFailed(OutboxEvent event, Throwable error, int maxAttempts) {
+        if (maxAttempts <= 0) {
+            throw new IllegalArgumentException("Outbox max attempts must be positive");
+        }
         var delay = Duration.ofSeconds(Math.min(300, 1L << Math.min(event.attempts(), 8)));
         var message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         if (message.length() > 1000) {
             message = message.substring(0, 1000);
         }
-        return jdbc.update("""
+        if (event.attempts() + 1 >= maxAttempts) {
+            var updated = jdbc.update("""
+                    UPDATE outbox_events
+                       SET attempts = attempts + 1,
+                           dead_lettered_at = ?,
+                           lock_token = NULL,
+                           locked_until = NULL,
+                           last_error = ?
+                     WHERE id = ? AND lock_token = ?
+                       AND published_at IS NULL AND dead_lettered_at IS NULL
+                    """, Timestamp.from(clock.instant()), message, event.id(), event.lockToken());
+            return updated == 1 ? OutboxFailureResult.DEAD_LETTERED : OutboxFailureResult.LEASE_LOST;
+        }
+
+        var updated = jdbc.update("""
                 UPDATE outbox_events
                    SET attempts = attempts + 1,
                        next_attempt_at = ?,
                        lock_token = NULL,
                        locked_until = NULL,
                        last_error = ?
-                 WHERE id = ? AND lock_token = ? AND published_at IS NULL
-                """, Timestamp.from(clock.instant().plus(delay)), message, event.id(), event.lockToken()) == 1;
+                 WHERE id = ? AND lock_token = ?
+                   AND published_at IS NULL AND dead_lettered_at IS NULL
+                """, Timestamp.from(clock.instant().plus(delay)), message, event.id(), event.lockToken());
+        return updated == 1 ? OutboxFailureResult.RETRY_SCHEDULED : OutboxFailureResult.LEASE_LOST;
+    }
+
+    public double oldestUnpublishedAgeSeconds() {
+        var age = jdbc.queryForObject("""
+                SELECT COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - min(created_at))), 0)
+                  FROM outbox_events
+                 WHERE published_at IS NULL AND dead_lettered_at IS NULL
+                """, Double.class);
+        return age == null ? 0 : Math.max(0, age);
     }
 }

@@ -14,7 +14,7 @@ Trade-off: hot accounts become throughput bottlenecks. Optimistic-only retries c
 
 ## Append-only corrections
 
-Posted entries cannot be updated or deleted. Corrections are equal-and-opposite reversals linked to the original transaction.
+A journal is assembled as a transaction-local draft and must be sealed before commit. The database validates its balance at the seal transition; after that, neither its header nor entries can be extended, updated, or deleted. Corrections are equal-and-opposite reversals linked to the original transaction.
 
 Trade-off: history grows and reporting must understand reversal links. The benefit is a complete audit trail and no ambiguity about what was originally posted.
 
@@ -28,7 +28,7 @@ Trade-off: idempotency rows grow with traffic and need a retention policy. Finan
 
 Direct publication inside the request cannot atomically commit with PostgreSQL. The outbox accepts asynchronous propagation and at-least-once delivery to remove lost-event dual writes.
 
-Trade-off: downstream consumers see small propagation delay and must deduplicate. Backlog age, retry count, and oldest unpublished event should be alerted on in production.
+Trade-off: downstream consumers see small propagation delay and must deduplicate. Failed events retry with bounded exponential backoff and move to a dead-letter state after the configured attempt limit. Operators must inspect and explicitly requeue dead letters.
 
 ## Redis token bucket with local fallback
 
