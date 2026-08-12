@@ -19,7 +19,7 @@
 
     <properties>
         <java.version>25</java.version>
-        <testcontainers.version>2.0.3</testcontainers.version>
+        <testcontainers.version>2.0.5</testcontainers.version>
         <jmh.version>1.37</jmh.version>
     </properties>
 
