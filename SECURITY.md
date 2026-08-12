@@ -2,11 +2,13 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a suspected vulnerability. Contact the repository owner privately with the affected version, reproduction steps, impact, and any proposed mitigation. Avoid including real credentials or customer data.
+Please do not open a public issue for a suspected vulnerability. Use GitHub's private vulnerability reporting with the affected version, reproduction steps, impact, and any proposed mitigation. Avoid including real credentials or customer data.
 
 ## Supported versions
 
-Until the first stable release, only the latest commit on `main` receives security fixes.
+| Version | Supported |
+|---|---|
+| 0.1.x | Yes |
 
 ## Security boundaries
 

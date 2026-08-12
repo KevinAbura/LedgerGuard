@@ -8,10 +8,10 @@ It uses Java 25, Spring Boot 4, PostgreSQL, Redis, and Kafka. The core journal i
 
 - Double-entry validation in both Java and PostgreSQL
 - Database-enforced tenant, currency, numeric-range, and negative-balance boundaries
-- Immutable journal entries and auditable reversals
+- Database-sealed journal headers and entries with auditable reversals
 - Transactional idempotency with request-hash conflict detection
 - Deterministic `SELECT ... FOR UPDATE` locking and optimistic version checks
-- Transactional outbox with Kafka retry, backoff, and `SKIP LOCKED` claims
+- Transactional outbox with Kafka retry, dead-lettering, requeue, and `SKIP LOCKED` claims
 - Per-client Redis token bucket implemented as an atomic Lua script
 - Conservative in-process rate-limit fallback when Redis is unavailable
 - Tenant isolation from the API key through every repository query
@@ -87,7 +87,7 @@ flowchart LR
     API --> Metrics["Actuator / Prometheus"]
 ```
 
-The posting transaction atomically claims the idempotency key, locks all accounts in UUID order, inserts the journal and entries, updates balance projections, inserts an outbox event, and stores the replay response. Any failure rolls all of it back. A transaction accepts 2–100 entries, and monetary values must fit PostgreSQL `NUMERIC(30, 8)` without rounding.
+The posting transaction atomically claims the idempotency key, locks all accounts in UUID order, creates a draft journal, inserts and seals its entries, updates balance projections, inserts an outbox event, and stores the replay response. A deferred database trigger rejects any draft that reaches commit, and posted headers and entries cannot be mutated. Any failure rolls all of it back. A transaction accepts 2–100 entries, and monetary values must fit PostgreSQL `NUMERIC(30, 8)` without rounding.
 
 See [architecture.md](docs/architecture.md) for the posting sequence and [design-decisions.md](docs/design-decisions.md) for explicit trade-offs.
 
@@ -124,7 +124,7 @@ Results must be compared on the same machine and JVM. The benchmark deliberately
 - `/actuator/health/readiness`
 - `/actuator/prometheus`
 
-Rate-limit metrics include `ledgerguard_rate_limit_decisions_total`, `ledgerguard_rate_limit_fallback_total`, and `ledgerguard_rate_limit_redis_errors_total`. Outbox results are exposed through `ledgerguard_outbox_events_total`.
+Rate-limit metrics include `ledgerguard_rate_limit_decisions_total`, `ledgerguard_rate_limit_fallback_total`, and `ledgerguard_rate_limit_redis_errors_total`. Outbox results are exposed through `ledgerguard_outbox_events_total`; `ledgerguard_outbox_oldest_unpublished_age_seconds` reports pending-event age.
 
 ## Scope and limitations
 
@@ -137,6 +137,7 @@ This is a rigorous portfolio-sized ledger, not a complete regulated banking plat
 - [Operations and failure modes](docs/operations.md)
 - [Benchmark methodology](docs/benchmark.md)
 - [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 

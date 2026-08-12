@@ -143,8 +143,8 @@ public class LedgerRepository {
             jdbc.update("""
                     INSERT INTO journal_transactions
                         (id, tenant_id, external_reference, transaction_type, description,
-                         effective_at, created_at, reversal_of)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         effective_at, created_at, reversal_of, status, sealed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', NULL)
                     """, transactionId, tenantId, externalReference, transactionType, description,
                     Timestamp.from(effectiveAt), Timestamp.from(now), reversalOf);
 
@@ -166,6 +166,17 @@ public class LedgerRepository {
         }
     }
 
+    public void sealTransaction(UUID tenantId, UUID transactionId, Instant sealedAt) {
+        var updated = jdbc.update("""
+                UPDATE journal_transactions
+                   SET status = 'POSTED', sealed_at = ?
+                 WHERE tenant_id = ? AND id = ? AND status = 'DRAFT'
+                """, Timestamp.from(sealedAt), tenantId, transactionId);
+        if (updated != 1) {
+            throw new ConflictException("transaction_not_sealed", "Transaction could not be sealed exactly once");
+        }
+    }
+
     public void updateBalance(
             UUID tenantId, UUID accountId, BigDecimal newBalance, long expectedVersion, Instant now) {
         var updated = jdbc.update("""
@@ -184,6 +195,7 @@ public class LedgerRepository {
                        effective_at, created_at, reversal_of, reversed_by
                   FROM journal_transactions
                  WHERE tenant_id = ? AND id = ?
+                   AND status = 'POSTED'
                  FOR UPDATE
                 """, (rs, rowNum) -> new StoredTransaction(
                 rs.getObject("id", UUID.class),
@@ -219,6 +231,7 @@ public class LedgerRepository {
                        effective_at, created_at, reversal_of, reversed_by
                   FROM journal_transactions
                  WHERE tenant_id = ? AND id = ?
+                   AND status = 'POSTED'
                 """, (rs, rowNum) -> new TransactionView(
                 rs.getObject("id", UUID.class),
                 rs.getString("external_reference"),

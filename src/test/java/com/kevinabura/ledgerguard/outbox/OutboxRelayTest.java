@@ -34,7 +34,7 @@ class OutboxRelayTest {
         when(repository.claimBatch(50)).thenReturn(List.of(first, second));
         when(kafka.send(eq("events"), anyString(), anyString())).thenReturn(firstResult, secondResult);
         when(repository.markPublished(any())).thenReturn(true);
-        var relay = new OutboxRelay(repository, kafka, "events", 50, 5_000, metrics);
+        var relay = new OutboxRelay(repository, kafka, "events", 50, 5_000, 10, metrics);
         var executor = Executors.newSingleThreadExecutor();
 
         try {
@@ -65,12 +65,36 @@ class OutboxRelayTest {
                 .thenReturn(CompletableFuture.completedFuture(null));
         when(repository.markPublished(event)).thenReturn(false);
 
-        new OutboxRelay(repository, kafka, "events", 1, 5_000, metrics).publishAvailable();
+        new OutboxRelay(repository, kafka, "events", 1, 5_000, 10, metrics).publishAvailable();
 
         assertThat(metrics.counter("ledgerguard.outbox.events", "result", "published").count())
                 .isZero();
         assertThat(metrics.counter("ledgerguard.outbox.events", "result", "lease_lost").count())
                 .isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deadLettersAnEventAfterTheConfiguredAttemptLimit() {
+        var repository = mock(OutboxRepository.class);
+        KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+        var metrics = new SimpleMeterRegistry();
+        var event = event();
+        var failedSend = new CompletableFuture<SendResult<String, String>>();
+        failedSend.completeExceptionally(new IllegalStateException("poison event"));
+        when(repository.claimBatch(1)).thenReturn(List.of(event));
+        when(kafka.send("events", event.aggregateId().toString(), event.payload()))
+                .thenReturn(failedSend);
+        when(repository.markFailed(eq(event), any(Throwable.class), eq(2)))
+                .thenReturn(OutboxFailureResult.DEAD_LETTERED);
+
+        new OutboxRelay(repository, kafka, "events", 1, 5_000, 2, metrics).publishAvailable();
+
+        verify(repository).markFailed(eq(event), any(Throwable.class), eq(2));
+        assertThat(metrics.counter("ledgerguard.outbox.events", "result", "dead_lettered").count())
+                .isEqualTo(1);
+        assertThat(metrics.counter("ledgerguard.outbox.events", "result", "failed").count())
+                .isZero();
     }
 
     private static OutboxEvent event() {

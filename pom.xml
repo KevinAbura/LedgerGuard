@@ -13,7 +13,7 @@
 
     <groupId>com.kevinabura</groupId>
     <artifactId>ledgerguard</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <name>LedgerGuard</name>
     <description>Double-entry ledger with idempotency, concurrency control, outbox, and distributed rate limiting</description>
 

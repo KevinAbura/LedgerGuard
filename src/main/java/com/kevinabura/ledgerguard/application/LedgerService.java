@@ -186,6 +186,7 @@ public class LedgerService {
                 reversalOf,
                 command.entries(),
                 accounts);
+        repository.sealTransaction(tenantId, transactionId, now);
 
         for (var account : accounts.values()) {
             var delta = command.entries().stream()
